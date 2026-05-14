@@ -3,6 +3,14 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+# Bridge Streamlit Cloud secrets into os.environ (no-op when running locally)
+try:
+    for k, v in st.secrets.items():
+        if k not in os.environ:
+            os.environ[k] = str(v)
+except Exception:
+    pass
+
 from storage.database import init_db
 
 st.set_page_config(

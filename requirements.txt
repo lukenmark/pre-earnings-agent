@@ -32,5 +32,8 @@ streamlit==1.57.0
 # Async
 anyio==4.13.0
 
+# PostgreSQL driver
+psycopg2-binary==2.9.10
+
 # Dev / testing
 pytest==9.0.3
