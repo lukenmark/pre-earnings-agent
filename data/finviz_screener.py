@@ -34,10 +34,11 @@ def _parse_finviz_value(value: str | None, is_pct: bool = False) -> float | None
 
 def run_finviz_screen() -> list[dict]:
     """
-    Screens for profitable US growth stocks. No earnings date cap — yfinance
-    handles the future-earnings check for every candidate so nothing is missed.
+    Screens for profitable US growth stocks reporting this calendar month.
+    "This Month" keeps the watchlist relevant — only stocks with imminent earnings.
 
-    Finviz filters (quality only, no time restriction):
+    Finviz filters:
+    - Earnings Date: This Month  — reporting this calendar month
     - USA only
     - 5-year sales growth > 15% — proven revenue growers
     - P/E: Profitable (>0)       — eliminates money-losers up front
@@ -58,13 +59,14 @@ def run_finviz_screen() -> list[dict]:
     try:
         foverview = FinvizOverview()
         foverview.set_filter(filters_dict={
+            "Earnings Date": "This Month",
             "Country": "USA",
             "Sales growthpast 5 years": "Over 15%",
             "P/E": "Profitable (>0)",
         })
         df = foverview.screener_view()
         if df is None or df.empty:
-            logger.warning("finviz_screener: Finviz returned empty results")
+            logger.info("finviz_screener: no results this month — normal between earnings seasons")
             set(key, [], "finviz")
             return []
 
@@ -84,7 +86,7 @@ def run_finviz_screen() -> list[dict]:
                 "industry": d.get("Industry", ""),
             })
 
-        logger.info(f"finviz_screener: {len(candidates)} quality candidates to check")
+        logger.info(f"finviz_screener: {len(candidates)} candidates reporting this month")
         set(key, candidates, "finviz")
         return candidates
 
