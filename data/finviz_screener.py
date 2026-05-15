@@ -1,8 +1,6 @@
-import random
 from data.cache import get, set, make_key
 from utils.logger import logger
 
-# Attempt to import finvizfinance; fall back gracefully
 try:
     from finvizfinance.screener.overview import Overview as FinvizOverview
     _FINVIZ_AVAILABLE = True
@@ -12,41 +10,13 @@ except ImportError:
 
 
 MOCK_CANDIDATES = [
-    {
-        "ticker": "NVDA",
-        "company": "NVIDIA Corp",
-        "market_cap": 2_800_000_000_000,
-        "eps_ttm": 2.42,
-        "debt_equity": 0.41,
-        "inst_own_pct": 65.0,
-        "sales_growth": 122.0,
-        "pe_ratio": 45.0,
-    },
-    {
-        "ticker": "SMCI",
-        "company": "Super Micro Computer",
-        "market_cap": 25_000_000_000,
-        "eps_ttm": 1.82,
-        "debt_equity": 0.62,
-        "inst_own_pct": 55.0,
-        "sales_growth": 37.0,
-        "pe_ratio": 28.0,
-    },
-    {
-        "ticker": "CELH",
-        "company": "Celsius Holdings",
-        "market_cap": 4_500_000_000,
-        "eps_ttm": 0.82,
-        "debt_equity": 0.05,
-        "inst_own_pct": 48.0,
-        "sales_growth": 28.0,
-        "pe_ratio": 35.0,
-    },
+    {"ticker": "NVDA", "company": "NVIDIA Corp", "market_cap": 2_800_000_000_000, "eps_ttm": 2.42, "debt_equity": 0.41, "inst_own_pct": 65.0, "sales_growth": 122.0, "pe_ratio": 45.0},
+    {"ticker": "SMCI", "company": "Super Micro Computer", "market_cap": 25_000_000_000, "eps_ttm": 1.82, "debt_equity": 0.62, "inst_own_pct": 55.0, "sales_growth": 37.0, "pe_ratio": 28.0},
+    {"ticker": "CELH", "company": "Celsius Holdings", "market_cap": 4_500_000_000, "eps_ttm": 0.82, "debt_equity": 0.05, "inst_own_pct": 48.0, "sales_growth": 28.0, "pe_ratio": 35.0},
 ]
 
 
 def _parse_finviz_value(value: str | None, is_pct: bool = False) -> float | None:
-    """Parse Finviz string values like '1.23B', '45.6%', '-0.15'"""
     if value is None or value == "-":
         return None
     try:
@@ -63,10 +33,23 @@ def _parse_finviz_value(value: str | None, is_pct: bool = False) -> float | None
 
 
 def run_finviz_screen() -> list[dict]:
-    """Runs Finviz screener with hard filters. Returns list of candidate dicts."""
+    """
+    Runs Finviz screener. Earnings date filter goes first — most restrictive,
+    narrows ~1045 → ~30-100 before any yfinance calls happen.
+
+    Filter order (most → least restrictive):
+    1. Earnings Date: This Month  — only stocks reporting this calendar month
+    2. Country: USA
+    3. Sales growth past 5Y >15% — proven revenue growers
+    4. P/E: Profitable (>0)       — eliminates money-losers up front
+
+    Cached for 1 hour. market cap / debt / inst_own filtering happens in
+    apply_penalty_scoring() using real yfinance data.
+    """
     key = make_key("finviz", "screen")
     cached = get(key)
     if cached is not None:
+        logger.info(f"finviz_screener: cached results ({len(cached)} candidates)")
         return cached
 
     if not _FINVIZ_AVAILABLE:
@@ -76,38 +59,37 @@ def run_finviz_screen() -> list[dict]:
     try:
         foverview = FinvizOverview()
         foverview.set_filter(filters_dict={
+            "Earnings Date": "This Month",
             "Country": "USA",
             "Sales growthpast 5 years": "Over 15%",
+            "P/E": "Profitable (>0)",
         })
         df = foverview.screener_view()
         if df is None or df.empty:
-            logger.warning("finviz_screener: empty result from Finviz — check filters")
+            logger.info("finviz_screener: no results for this month's earnings — normal between seasons")
             set(key, [], "finviz")
             return []
 
         candidates = []
         for _, row in df.iterrows():
-            row_dict = row.to_dict()
+            d = row.to_dict()
             candidates.append({
-                "ticker": row_dict.get("Ticker", ""),
-                "company": row_dict.get("Company", ""),
-                "market_cap": _parse_finviz_value(row_dict.get("Market Cap")),
-                "eps_ttm": _parse_finviz_value(row_dict.get("EPS (ttm)")),
-                "debt_equity": _parse_finviz_value(row_dict.get("Debt/Eq")),
-                "inst_own_pct": _parse_finviz_value(row_dict.get("Inst Own"), is_pct=True),
-                "sales_growth": _parse_finviz_value(row_dict.get("Sales past 5Y"), is_pct=True),
-                "pe_ratio": _parse_finviz_value(row_dict.get("P/E")),
-                "sector": row_dict.get("Sector", ""),
-                "industry": row_dict.get("Industry", ""),
+                "ticker": d.get("Ticker", ""),
+                "company": d.get("Company", ""),
+                "market_cap": _parse_finviz_value(d.get("Market Cap")),
+                "eps_ttm": _parse_finviz_value(d.get("EPS (ttm)")),
+                "debt_equity": _parse_finviz_value(d.get("Debt/Eq")),
+                "inst_own_pct": _parse_finviz_value(d.get("Inst Own"), is_pct=True),
+                "sales_growth": _parse_finviz_value(d.get("Sales past 5Y"), is_pct=True),
+                "pe_ratio": _parse_finviz_value(d.get("P/E")),
+                "sector": d.get("Sector", ""),
+                "industry": d.get("Industry", ""),
             })
 
-        # Shuffle so repeated scans explore different parts of the universe
-        random.shuffle(candidates)
-        import os
-        limit = int(os.getenv("FINVIZ_SCREEN_LIMIT", "200"))
-        candidates = candidates[:limit]
+        logger.info(f"finviz_screener: {len(candidates)} candidates with earnings this month")
         set(key, candidates, "finviz")
         return candidates
+
     except Exception as e:
         logger.warning(f"run_finviz_screen: {e} — using mock fallback")
         return MOCK_CANDIDATES
@@ -133,7 +115,7 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
         if mc is not None:
             if mc < 300_000_000 or mc > 20_000_000_000:
                 excluded = True
-                exclusion_reason.append(f"market_cap={mc:.0f} outside 300M-20B")
+                exclusion_reason.append(f"market_cap outside 300M-20B")
             elif mc > 15_000_000_000:
                 penalty = int((mc - 15_000_000_000) / 1_000_000_000)
                 score -= min(15, penalty)
@@ -142,7 +124,7 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
         if eps is not None and eps < 0:
             if eps < -0.50:
                 excluded = True
-                exclusion_reason.append(f"eps_ttm={eps} < -0.50")
+                exclusion_reason.append(f"eps_ttm={eps:.2f} < -0.50")
             elif eps < -0.15:
                 penalty = int(abs(eps + 0.15) / 0.35 * 20)
                 score -= min(20, max(5, penalty))
@@ -151,7 +133,7 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
         if de is not None:
             if de > 1.5:
                 excluded = True
-                exclusion_reason.append(f"debt_equity={de} > 1.5")
+                exclusion_reason.append(f"debt_equity={de:.2f} > 1.5")
             elif de > 1.0:
                 penalty = int((de - 1.0) / 0.5 * 15)
                 score -= min(15, max(5, penalty))
@@ -173,7 +155,10 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
 
 
 def screen_candidates(industry_filter: list[str] | None = None) -> list[dict]:
-    """Full pipeline: screen → penalty → filter excludes → sort by screen_score. Max 20."""
+    """
+    Full pipeline: Finviz screen → penalty scoring → filter excludes → sort.
+    Returns ALL passing candidates (no cap — watchlist_manager decides how many to add).
+    """
     raw = run_finviz_screen()
     scored = apply_penalty_scoring(raw)
     active = [c for c in scored if not c.get("excluded", False)]
@@ -187,4 +172,4 @@ def screen_candidates(industry_filter: list[str] | None = None) -> list[dict]:
     else:
         active.sort(key=lambda c: -c["screen_score"])
 
-    return active[:20]
+    return active
