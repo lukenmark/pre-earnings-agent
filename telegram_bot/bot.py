@@ -7,7 +7,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, Update
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from telegram_bot.handlers import help, watchlist, scan, analyze, checkpoint, alerts, feedback, status, chat
+from telegram_bot.handlers import help, watchlist, scan, analyze, checkpoint, alerts, feedback, status, price_watch, chat
 from utils.logger import logger
 
 load_dotenv()
@@ -58,6 +58,7 @@ def create_dispatcher() -> Dispatcher:
         alerts.router,
         feedback.router,
         status.router,
+        price_watch.router,
         chat.router,
     ]:
         router.message.filter(auth)

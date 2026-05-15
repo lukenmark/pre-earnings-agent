@@ -48,6 +48,16 @@ def _job_checkpoint_check():
         logger.error(f"Scheduler: checkpoint check failed: {e}")
 
 
+def _job_alert_watchlist_check():
+    """Daily at 9:00 AM ET: check alert watchlist for price/news triggers"""
+    logger.info("Scheduler: running alert watchlist check")
+    try:
+        from orchestrator.alert_monitor import run_alert_check
+        run_alert_check()
+    except Exception as e:
+        logger.error(f"Scheduler: alert watchlist check failed: {e}")
+
+
 def _job_earnings_date_refresh():
     """Weekly: refresh earnings dates for all active watchlist tickers"""
     logger.info("Scheduler: refreshing earnings dates")
@@ -125,8 +135,18 @@ def start_scheduler() -> BackgroundScheduler:
         misfire_grace_time=7200,
     )
 
+    # Alert watchlist check: every weekday at 9:00 AM ET
+    _scheduler.add_job(
+        _job_alert_watchlist_check,
+        trigger=CronTrigger(hour=9, minute=0, day_of_week="mon-fri"),
+        id="alert_watchlist_check",
+        name="Alert Watchlist Check",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     _scheduler.start()
-    logger.info("Scheduler started: discovery Mon/Wed/Fri 6AM, checkpoints weekdays 7AM, earnings refresh Sun 5AM")
+    logger.info("Scheduler started: discovery Mon/Wed/Fri 6AM, checkpoints weekdays 7AM, alert watchlist weekdays 9AM, earnings refresh Sun 5AM")
     return _scheduler
 
 

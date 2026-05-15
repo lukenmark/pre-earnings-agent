@@ -86,6 +86,17 @@ class IndustryAssessmentRow(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class AlertWatchlistRow(Base):
+    __tablename__ = "alert_watchlist"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    company_name: Mapped[str] = mapped_column(String, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class RawDataCacheRow(Base):
     __tablename__ = "raw_data_cache"
 
