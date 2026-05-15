@@ -34,17 +34,16 @@ def _parse_finviz_value(value: str | None, is_pct: bool = False) -> float | None
 
 def run_finviz_screen() -> list[dict]:
     """
-    Runs Finviz screener. Earnings date filter goes first — most restrictive,
-    narrows ~1045 → ~30-100 before any yfinance calls happen.
+    Screens for profitable US growth stocks. No earnings date cap — yfinance
+    handles the future-earnings check for every candidate so nothing is missed.
 
-    Filter order (most → least restrictive):
-    1. Earnings Date: This Month  — only stocks reporting this calendar month
-    2. Country: USA
-    3. Sales growth past 5Y >15% — proven revenue growers
-    4. P/E: Profitable (>0)       — eliminates money-losers up front
+    Finviz filters (quality only, no time restriction):
+    - USA only
+    - 5-year sales growth > 15% — proven revenue growers
+    - P/E: Profitable (>0)       — eliminates money-losers up front
 
-    Cached for 1 hour. market cap / debt / inst_own filtering happens in
-    apply_penalty_scoring() using real yfinance data.
+    market cap / debt / inst_own filtering happens in apply_penalty_scoring()
+    using real yfinance data. Cached 1 hour.
     """
     key = make_key("finviz", "screen")
     cached = get(key)
@@ -59,14 +58,13 @@ def run_finviz_screen() -> list[dict]:
     try:
         foverview = FinvizOverview()
         foverview.set_filter(filters_dict={
-            "Earnings Date": "This Month",
             "Country": "USA",
             "Sales growthpast 5 years": "Over 15%",
             "P/E": "Profitable (>0)",
         })
         df = foverview.screener_view()
         if df is None or df.empty:
-            logger.info("finviz_screener: no results for this month's earnings — normal between seasons")
+            logger.warning("finviz_screener: Finviz returned empty results")
             set(key, [], "finviz")
             return []
 
@@ -86,7 +84,7 @@ def run_finviz_screen() -> list[dict]:
                 "industry": d.get("Industry", ""),
             })
 
-        logger.info(f"finviz_screener: {len(candidates)} candidates with earnings this month")
+        logger.info(f"finviz_screener: {len(candidates)} quality candidates to check")
         set(key, candidates, "finviz")
         return candidates
 
