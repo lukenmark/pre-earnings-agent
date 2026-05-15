@@ -69,8 +69,8 @@ class WatchlistManager:
                     logger.warning(f"Could not fetch info for {ticker}: {e}")
 
                 earnings_date = _parse_earnings_date(info.get("earningsDate") or info.get("earningsTimestamp"))
-                if not earnings_date:
-                    logger.info(f"Skipping {ticker} — no upcoming earnings date found")
+                if not earnings_date or earnings_date < date.today():
+                    logger.info(f"Skipping {ticker} — no future earnings date (got {earnings_date})")
                     continue
 
                 # Re-score using real yfinance financials (Finviz Overview lacks these columns)

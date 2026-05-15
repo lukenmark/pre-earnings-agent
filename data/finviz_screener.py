@@ -1,3 +1,4 @@
+import random
 from data.cache import get, set, make_key
 from utils.logger import logger
 
@@ -100,6 +101,11 @@ def run_finviz_screen() -> list[dict]:
                 "industry": row_dict.get("Industry", ""),
             })
 
+        # Shuffle so repeated scans explore different parts of the universe
+        random.shuffle(candidates)
+        import os
+        limit = int(os.getenv("FINVIZ_SCREEN_LIMIT", "200"))
+        candidates = candidates[:limit]
         set(key, candidates, "finviz")
         return candidates
     except Exception as e:
@@ -115,7 +121,7 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
     - Market cap $300M-$15B: 0 penalty. $15B-$20B: graduated -5 to -15. Outside: exclude.
     - EPS: positive or 0 to -0.15: 0 penalty. -0.15 to -0.50: graduated -5 to -20. < -0.50: exclude.
     - Debt/Equity: < 1.0: 0 penalty. 1.0-1.5: graduated -5 to -15. > 1.5: exclude.
-    - Inst ownership: < 50%: 0 penalty. 50-70%: graduated -5 to -10. > 70%: exclude.
+    - Inst ownership: < 65%: 0 penalty. 65-90%: graduated -5 to -15. > 90%: exclude.
     """
     results = []
     for c in candidates:
@@ -152,12 +158,12 @@ def apply_penalty_scoring(candidates: list[dict]) -> list[dict]:
 
         inst = c.get("inst_own_pct")
         if inst is not None:
-            if inst > 70.0:
+            if inst > 90.0:
                 excluded = True
-                exclusion_reason.append(f"inst_own={inst}% > 70%")
-            elif inst > 50.0:
-                penalty = int((inst - 50.0) / 20.0 * 10)
-                score -= min(10, max(5, penalty))
+                exclusion_reason.append(f"inst_own={inst:.1f}% > 90%")
+            elif inst > 65.0:
+                penalty = int((inst - 65.0) / 25.0 * 15)
+                score -= min(15, max(5, penalty))
 
         result = {**c, "screen_score": max(0, score), "excluded": excluded}
         if exclusion_reason:
