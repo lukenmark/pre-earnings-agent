@@ -7,7 +7,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import Message, Update
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from telegram_bot.handlers import help, watchlist, scan, analyze, checkpoint, alerts, feedback, status
+from telegram_bot.handlers import help, watchlist, scan, analyze, checkpoint, alerts, feedback, status, chat
 from utils.logger import logger
 
 load_dotenv()
@@ -48,6 +48,7 @@ def create_dispatcher() -> Dispatcher:
     auth = AuthFilter()
 
     # Register all routers with auth filter applied at router level
+    # chat.router must be last — it catches all non-command text messages
     for router in [
         help.router,
         watchlist.router,
@@ -57,6 +58,7 @@ def create_dispatcher() -> Dispatcher:
         alerts.router,
         feedback.router,
         status.router,
+        chat.router,
     ]:
         router.message.filter(auth)
         dp.include_router(router)
