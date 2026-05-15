@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from models.watchlist import WatchlistEntry
 from storage.database import get_db
@@ -6,7 +6,7 @@ from storage.repositories.watchlist_repo import (
     get_all_active, get_by_ticker, add, update_status, update_earnings_date
 )
 from storage.repositories.industry_repo import get_active as get_active_industries
-from data.finviz_screener import screen_candidates
+from data.finviz_screener import screen_candidates, apply_penalty_scoring
 from data.yfinance_client import get_stock_info, get_market_cap
 from orchestrator.fiscal_calendar import FiscalCalendar
 from utils.logger import logger
@@ -69,6 +69,27 @@ class WatchlistManager:
                     logger.warning(f"Could not fetch info for {ticker}: {e}")
 
                 earnings_date = _parse_earnings_date(info.get("earningsDate") or info.get("earningsTimestamp"))
+                if not earnings_date:
+                    logger.info(f"Skipping {ticker} — no upcoming earnings date found")
+                    continue
+
+                # Re-score using real yfinance financials (Finviz Overview lacks these columns)
+                # debtToEquity from yfinance is in percent (41.0 = 0.41 ratio); inst is decimal (0.65 = 65%)
+                de_raw = info.get("debtToEquity")
+                inst_raw = info.get("heldPercentInstitutions")
+                enriched = {
+                    **c,
+                    "market_cap": info.get("marketCap") or c.get("market_cap"),
+                    "eps_ttm": info.get("trailingEps") if info.get("trailingEps") is not None else c.get("eps_ttm"),
+                    "debt_equity": de_raw / 100 if de_raw is not None else c.get("debt_equity"),
+                    "inst_own_pct": inst_raw * 100 if inst_raw is not None else c.get("inst_own_pct"),
+                }
+                rescored = apply_penalty_scoring([enriched])[0]
+                if rescored.get("excluded"):
+                    logger.info(f"Skipping {ticker} — excluded after rescoring: {rescored.get('exclusion_reason', '')}")
+                    continue
+                screen_score = rescored["screen_score"]
+
                 fiscal_year_end = _infer_fiscal_year_end(info)
                 industry_match = c.get("industry", "") in self._active_industries
 
@@ -80,9 +101,9 @@ class WatchlistManager:
                     status="candidate",
                     date_added=datetime.now(timezone.utc),
                     industry=c.get("industry"),
-                    eps_ttm=c.get("eps_ttm"),
-                    market_cap=c.get("market_cap"),
-                    notes=f"screen_score={c.get('screen_score', 0):.0f}, industry_match={industry_match}",
+                    eps_ttm=enriched.get("eps_ttm"),
+                    market_cap=enriched.get("market_cap"),
+                    notes=f"screen_score={screen_score:.0f}, industry_match={industry_match}",
                 )
 
                 try:
@@ -90,11 +111,11 @@ class WatchlistManager:
                     new_entries.append({
                         "ticker": ticker,
                         "company_name": entry.company_name,
-                        "screen_score": c.get("screen_score", 0),
+                        "screen_score": screen_score,
                         "industry_match": industry_match,
                         "earnings_date": earnings_date.isoformat() if earnings_date else None,
                     })
-                    logger.info(f"Added {ticker} to watchlist (industry_match={industry_match})")
+                    logger.info(f"Added {ticker} to watchlist score={screen_score:.0f} (industry_match={industry_match})")
                 except Exception as e:
                     logger.warning(f"Failed to add {ticker} to watchlist: {e}")
 
@@ -165,18 +186,27 @@ class WatchlistManager:
 
 
 def _parse_earnings_date(raw) -> date | None:
-    """Parse earnings date from various yfinance formats"""
+    """Parse earnings date from various yfinance formats. Returns first future date."""
     if raw is None:
         return None
-    if isinstance(raw, (list, tuple)) and raw:
-        raw = raw[0]
-    if isinstance(raw, date):
-        return raw
+    if isinstance(raw, (list, tuple)):
+        today = date.today()
+        for item in raw:
+            d = _parse_single_date(item)
+            if d and d >= today:
+                return d
+        return None
+    return _parse_single_date(raw)
+
+
+def _parse_single_date(raw) -> date | None:
     if isinstance(raw, datetime):
         return raw.date()
+    if isinstance(raw, date):
+        return raw
     if isinstance(raw, (int, float)):
         try:
-            return datetime.utcfromtimestamp(raw).date()
+            return datetime.fromtimestamp(raw, tz=timezone.utc).date()
         except Exception:
             return None
     if isinstance(raw, str):
